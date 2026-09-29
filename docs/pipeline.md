@@ -157,34 +157,36 @@ WHEN NOT MATCHED THEN INSERT (
 
 ## Schedule
 
-CI runs the job once a day, a few hours after the Data Transfer's daily run, with the API keys in its secret variables. In GitLab that is a pipeline schedule plus a job that only runs on it; GitHub Actions does the same with an `on: schedule` trigger.
+CI runs the job once a day, a few hours after the Data Transfer's daily run, with the API keys in its secret variables. In GitHub Actions that is a workflow with an `on: schedule` trigger:
 
 ```yaml
-# .gitlab-ci.yml
-negatives-daily:
-  image: python:3.12-slim
-  resource_group: negatives           # one run at a time
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $JOB == "negatives-daily"
-  script:
-    - pip install uv
-    - uv sync --frozen
-    - uv run python -m negatives --live
-```
-
-With more than one schedule in the project, give each schedule a variable (`JOB` above) and match it in the rule, or every schedule runs every scheduled job.
-
-```yaml
-# .github/workflows/negatives-daily.yml: the trigger and the lock
+# .github/workflows/negatives-daily.yml
+name: negatives-daily
 on:
   schedule:
     - cron: "0 7 * * *"               # UTC, a few hours after the transfer's daily run
+  workflow_dispatch:                  # fire it once by hand
 concurrency:
   group: negatives                    # one run at a time
   cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}   # the service account below
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run python -m negatives --live
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
 ```
 
-A GitLab schedule lives in the project settings, not in the repo, so list every job on a clock in `docs/scheduled-jobs.md` in your repo: when it runs, what it writes, how it alerts, how to check it fired. A unit test that fails when CI has a scheduled job the page does not list keeps the page true. Fire each new job once by hand: a job that never ran produces no error.
+GitLab does the same with a pipeline schedule and a job whose rules only match that schedule, with `resource_group` as the lock. With more than one schedule in a GitLab project, give each schedule a variable and match it in the job's rules, or every schedule runs every scheduled job.
+
+Whichever CI runs it, list every job on a clock in `docs/scheduled-jobs.md` in your repo: when it runs, what it writes, how it alerts, how to check it fired. On GitLab that page is the only record, because a pipeline schedule lives in the project settings, not in the repo. A unit test that fails when CI has a scheduled job the page does not list keeps the page true. Fire each new job once by hand: a job that never ran produces no error.
 
 | Job | When | Writes | Alerts | Check it fired |
 | --- | --- | --- | --- | --- |
